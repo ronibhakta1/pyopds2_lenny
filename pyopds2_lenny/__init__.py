@@ -42,6 +42,39 @@ class LennyDataRecord(OpenLibraryDataRecord):
         return None
 
 
+def _unwrap_search_response(resp):
+    """Normalize different shapes returned by OpenLibraryDataProvider.search.
+
+    Returns a tuple (records_iterable, total_or_None).
+    Accepts tuple-like (records, total), objects with attributes
+    ('records','docs','items','data'), or any iterable.
+    """
+    # Tuple-like (records, total)
+    if isinstance(resp, tuple):
+        records = resp[0] if len(resp) >= 1 else []
+        total = resp[1] if len(resp) > 1 else None
+        return records, total
+
+    # Object with common attributes
+    for attr in ("records", "docs", "items", "data"):
+        if hasattr(resp, attr):
+            records = getattr(resp, attr)
+            # Try to find a total-like attribute
+            total = None
+            for tot_attr in ("total", "num_found", "numFound", "count", "size"):
+                if hasattr(resp, tot_attr):
+                    total = getattr(resp, tot_attr)
+                    break
+            return records, total
+
+    # Fallback: try to coerce to list
+    try:
+        records = list(resp)
+        return records, None
+    except Exception:
+        raise TypeError("cannot unpack non-iterable search response from OpenLibraryDataProvider.search")
+
+
 class LennyDataProvider(OpenLibraryDataProvider):
     """A DataProvider that adapts Open Library metadata for Lenny's local catalog."""
 
@@ -52,21 +85,20 @@ class LennyDataProvider(OpenLibraryDataProvider):
         limit: int,
         offset: int,
         lenny_ids: Optional[List[int]] = None,
-    ) -> List[LennyDataRecord]:
+    ) -> Tuple[List[LennyDataRecord], int]:
         """
         Perform a metadata search using Open Library's data provider,
         given a pre-computed query from Lenny.
         """
-        # Use OpenLibraryDataProvider to fetch enriched metadata
-        # NOTE: OpenLibraryDataProvider.search returns a SearchResponse object
-        # (not a tuple). Extract resp.records and resp.total accordingly.
+        # Use OpenLibraryDataProvider to fetch enriched metadata. Normalize
+        # whatever shape the provider returns into (records_iterable, total).
         resp = OpenLibraryDataProvider.search(
             query=query,
             limit=limit,
             offset=offset,
         )
-        ol_records = resp.records
-        numfound = resp.total if hasattr(resp, "total") else numfound
+
+        ol_records, total = _unwrap_search_response(resp)
 
         # Adapt OpenLibraryDataRecords to LennyDataRecords
         lenny_records = []
@@ -75,5 +107,5 @@ class LennyDataProvider(OpenLibraryDataProvider):
             data["lenny_id"] = lenny_ids[idx] if lenny_ids and idx < len(lenny_ids) else None
             lenny_records.append(LennyDataRecord.model_validate(data))
 
-        # Keep the original return shape: (records_list, numfound)
-        return lenny_records, numfound
+    # Prefer the total from the upstream provider when available.
+    return lenny_records, (total if total is not None else numfound)
