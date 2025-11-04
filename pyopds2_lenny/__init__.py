@@ -52,7 +52,7 @@ class LennyDataProvider(OpenLibraryDataProvider):
         limit: int,
         offset: int,
         lenny_ids: Optional[List[int]] = None,
-    ) -> Tuple[List[LennyDataRecord], int]:
+    ) -> List[LennyDataRecord]:
         """
         Perform a metadata search using Open Library's data provider,
         given a pre-computed query from Lenny.
