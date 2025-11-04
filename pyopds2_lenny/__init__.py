@@ -1,7 +1,7 @@
 # pyopds_lenny/__init__.py
 from typing import List, Tuple, Optional
 from pyopds2_openlibrary import OpenLibraryDataProvider, OpenLibraryDataRecord, Link
-from opds2.models import SearchResponse
+from opds2.provider import SearchResponse
 
 
 class LennyDataRecord(OpenLibraryDataRecord):
