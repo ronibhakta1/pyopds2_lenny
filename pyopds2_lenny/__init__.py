@@ -14,22 +14,49 @@ class LennyDataRecord(OpenLibraryDataRecord):
         return "http://schema.org/Book"
 
     def links(self) -> List[Link]:
-        """Override acquisition links to use Lenny's API endpoints."""
+        """Override acquisition links to use Lenny's API endpoints.
+
+        If the record was created with an `is_encrypted` flag the primary
+        acquisition link will be `/borrow` (for encrypted/loaned content),
+        otherwise `/read` for open-access/readable content. When encrypted
+        we also include a `return` endpoint.
+        """
         links = super().links()
         if self.lenny_id:
-            base_uri = f"/v1/api/items/{self.lenny_id}"
-            links = [
-                Link(
+            # Determine whether this record represents encrypted (loaned)
+            # content. Default to False when the attribute is missing.
+            encrypted = getattr(self, "is_encrypted", False)
+            # Accept an optional base_url on the record (set by the
+            # provider) and prefix it before the /v1/api path. Avoid
+            # duplicate slashes.
+            base_url = getattr(self, "base_url", "") or ""
+            base_url = base_url.rstrip("/")
+            path = f"/v1/api/items/{self.lenny_id}"
+            base_uri = f"{base_url}{path}" if base_url else path
+
+            # Primary acquisition link depends on encryption/loan status.
+            if encrypted:
+                primary = Link(
                     href=f"{base_uri}/borrow",
                     rel="http://opds-spec.org/acquisition/borrow",
                     type="application/json",
-                ),
-                Link(
+                )
+                # Add a return endpoint for borrowed items
+                return_link = Link(
                     href=f"{base_uri}/return",
-                    rel="http://opds-spec.org/acquisition/borrow",
+                    rel="http://librarysimplified.org/terms/return",
                     type="application/json",
-                ),
-            ]
+                )
+                links = [primary, return_link]
+            else:
+                # Open/readable content served at /read
+                primary = Link(
+                    href=f"{base_uri}/read",
+                    rel="http://opds-spec.org/acquisition/open-access",
+                    type="application/json",
+                )
+                links = [primary]
+
         return links
 
     def images(self) -> Optional[List[Link]]:
@@ -81,6 +108,8 @@ class LennyDataProvider(OpenLibraryDataProvider):
         limit: int,
         offset: int,
         lenny_ids: Optional[List[int]] = None,
+        is_encrypted: Optional[bool] = False,
+        base_url: Optional[str] = None,
     ) -> Tuple[List[LennyDataRecord], int]:
         """Perform a metadata search and adapt results into LennyDataRecords."""
         resp = OpenLibraryDataProvider.search(query=query, limit=limit, offset=offset)
@@ -95,17 +124,38 @@ class LennyDataProvider(OpenLibraryDataProvider):
         lenny_records = []
         for idx, record in enumerate(ol_records):
             data = record.model_dump()
+            # Use the exact lenny_id provided (if any). Do not use the loop
+            # index as the id — prefer any existing id in the record otherwise.
             data["lenny_id"] = (
-                lenny_ids[idx] if lenny_ids and idx < len(lenny_ids) else None
+                (lenny_ids[idx] if lenny_ids and idx < len(lenny_ids) else data.get("lenny_id"))
             )
+            # Propagate encryption/loan status and optional base_url onto
+            # the record so LennyDataRecord.links() can decide between
+            # /borrow and /read endpoints and prefix the API host.
+            data["is_encrypted"] = bool(is_encrypted)
+            data["base_url"] = base_url
             lenny_records.append(LennyDataRecord.model_validate(data))
 
         return lenny_records, (total if total is not None else numfound)
 
     @staticmethod
-    def create_opds_feed(records: List[LennyDataRecord], total: int, limit: int, offset: int):
-        """Construct an OPDS 2.0 JSON feed for Lenny's books."""
+    def create_opds_feed(
+        records: List[LennyDataRecord],
+        total: int,
+        limit: int,
+        offset: int,
+        base_url: Optional[str] = None,
+    ):
+        """Construct an OPDS 2.0 JSON feed for Lenny's books.
+
+        If a `base_url` is provided, prefix it to the feed-level links so
+        consumers receive fully-qualified URLs instead of relative paths.
+        """
         publications = [record.to_publication() for record in records]
+
+        base_url = (base_url or "").rstrip("/")
+        def _prefix(path: str) -> str:
+            return f"{base_url}{path}" if base_url else path
 
         return {
             "metadata": {
@@ -116,10 +166,10 @@ class LennyDataProvider(OpenLibraryDataProvider):
             },
             "publications": publications,
             "links": [
-                {"rel": "self", "href": f"/v1/api/opds?offset={offset}&limit={limit}"},
+                {"rel": "self", "href": _prefix(f"/v1/api/opds?offset={offset}&limit={limit}")},
                 {
                     "rel": "next",
-                    "href": f"/v1/api/opds?offset={offset + limit}&limit={limit}",
+                    "href": _prefix(f"/v1/api/opds?offset={offset + limit}&limit={limit}"),
                 },
             ],
         }
