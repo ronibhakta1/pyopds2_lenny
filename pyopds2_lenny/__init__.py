@@ -107,5 +107,5 @@ class LennyDataProvider(OpenLibraryDataProvider):
             data["lenny_id"] = lenny_ids[idx] if lenny_ids and idx < len(lenny_ids) else None
             lenny_records.append(LennyDataRecord.model_validate(data))
 
-    # Prefer the total from the upstream provider when available.
-    return lenny_records, (total if total is not None else numfound)
+        # Prefer the total from the upstream provider when available.
+        return lenny_records, (total if total is not None else numfound)
