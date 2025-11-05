@@ -106,7 +106,22 @@ class LennyDataProvider(OpenLibraryDataProvider):
 
         # Convert keys to a predictable list order for mapping
         if isinstance(lenny_ids, Mapping):
-            lenny_id_values = list(lenny_ids.keys())
+            keys = list(lenny_ids.keys())
+            values = list(lenny_ids.values())
+
+            def _looks_like_index_sequence(seq: List[int]) -> bool:
+                if not seq or not all(isinstance(item, int) for item in seq):
+                    return False
+                return seq == list(range(len(seq))) or seq == list(range(1, len(seq) + 1))
+
+            if values and all(isinstance(item, int) for item in values):
+                lenny_id_values = values
+            elif values and (_looks_like_index_sequence(keys) or not keys):
+                lenny_id_values = values
+            elif keys:
+                lenny_id_values = keys
+            else:
+                lenny_id_values = []
         elif isinstance(lenny_ids, Iterable) and not isinstance(lenny_ids, (str, bytes)):
             lenny_id_values = list(lenny_ids)
         else:
