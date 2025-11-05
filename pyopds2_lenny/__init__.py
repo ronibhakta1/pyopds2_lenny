@@ -162,7 +162,7 @@ class LennyDataProvider(OpenLibraryDataProvider):
 
         return {
             "metadata": {
-                "title": "Lenny Local Catalog",
+                "title": "Lenny Catalog",
                 "totalItems": total,
                 "itemsPerPage": limit,
                 "currentOffset": offset,
