@@ -1,7 +1,7 @@
 from typing import List, Tuple, Optional
 from collections.abc import Mapping, Iterable
 from pyopds2_openlibrary import OpenLibraryDataProvider, OpenLibraryDataRecord, Link
-from opds2.provider import SearchResponse
+from pyopds2.provider import SearchResponse
 
 
 class LennyDataRecord(OpenLibraryDataRecord):
