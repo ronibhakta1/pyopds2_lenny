@@ -25,10 +25,15 @@ class LennyDataRecord(OpenLibraryDataRecord):
         if not self.lenny_id:
             return base_links
 
+        base_links.append(Link(
+            rel="self",  
+            href=f"{LennyDataProvider.BASE_URL}/opds/{self.lenny_id}",
+            type="application/opds-publication+json",
+        ))
+        
         base_uri = f"{LennyDataProvider.BASE_URL}items/{self.lenny_id}"
-
         if getattr(self, "is_encrypted", False):
-            return [
+            base_links += [
                 Link(
                     href=f"{base_uri}/borrow",
                     rel="http://opds-spec.org/acquisition/borrow",
@@ -40,14 +45,15 @@ class LennyDataRecord(OpenLibraryDataRecord):
                     type="application/json",
                 ),
             ]
-
-        return [
-            Link(
-                href=f"{base_uri}/read",
-                rel="http://opds-spec.org/acquisition/open-access",
-                type="application/json",
-            )
-        ]
+        else:
+            base_links += [
+                Link(
+                    href=f"{base_uri}/read",
+                    rel="http://opds-spec.org/acquisition/open-access",
+                    type="application/json",
+                )
+            ]
+        return base_links
 
     def images(self) -> Optional[List[Link]]:
         """Provide cover image link based on Open Library cover ID."""
