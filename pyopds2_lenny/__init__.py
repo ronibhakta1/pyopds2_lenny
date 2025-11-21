@@ -1,7 +1,7 @@
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, cast
 from collections.abc import Mapping, Iterable
 from pyopds2_openlibrary import OpenLibraryDataProvider, OpenLibraryDataRecord, Link
-from pyopds2.provider import DataProvider
+from pyopds2.provider import DataProvider, DataProviderRecord
 
 
 class LennyDataRecord(OpenLibraryDataRecord):
@@ -85,43 +85,19 @@ class LennyDataRecord(OpenLibraryDataRecord):
         return []
 
 
-def _unwrap_search_response(resp):
-    """Minimal normalizer for the upstream search return shapes."""
-    if isinstance(resp, tuple):
-        records = resp[0] if len(resp) >= 1 else []
-        total = resp[1] if len(resp) > 1 else None
-        return records, total
-
-    if hasattr(resp, "records"):
-        return getattr(resp, "records"), getattr(resp, "total", None)
-
-    try:
-        return list(resp), None
-    except TypeError:
-        raise TypeError("cannot unpack non-iterable search response")
-
-
 class LennyDataProvider(OpenLibraryDataProvider):
     """Adapts Open Library metadata for Lenny's local catalog."""
 
     @staticmethod
     def search(
         query: str,
-        numfound: int,
-        limit: int,
-        offset: int,
+        limit: int = 50,
+        offset: int = 0,
         lenny_ids: Optional[Mapping[int, int]] = None,
         encryption_map: Optional[Mapping[int, bool]] = None,
-        base_url: Optional[str] = None,
-    ) -> Tuple[List[LennyDataRecord], int]:
+    ) -> DataProvider.SearchResponse:
         """Perform a metadata search and adapt results into LennyDataRecords."""
         resp = OpenLibraryDataProvider.search(query=query, limit=limit, offset=offset)
-
-        if isinstance(resp, DataProvider):
-            ol_records = resp.records or []
-            total = getattr(resp, "total", None)
-        else:
-            ol_records, total = _unwrap_search_response(resp)
 
         lenny_records: List[LennyDataRecord] = []
 
@@ -153,7 +129,7 @@ class LennyDataProvider(OpenLibraryDataProvider):
         else:
             lenny_id_values = []
 
-        for idx, record in enumerate(ol_records):
+        for idx, record in enumerate(resp.records):
             data = record.model_dump()
 
             # Assign lenny_id properly from mapping keys
@@ -166,8 +142,14 @@ class LennyDataProvider(OpenLibraryDataProvider):
                 data["is_encrypted"] = encryption_map.get(lenny_id, False)
             else:
                 data["is_encrypted"] = False
-            print("is_encrypted for record idx", idx, "lenny_id", lenny_id, ":", data["is_encrypted"])
-            data["base_url"] = base_url
             lenny_records.append(LennyDataRecord.model_validate(data))
             
-        return lenny_records, (total if total is not None else numfound)
+        return DataProvider.SearchResponse(
+            provider=LennyDataProvider,
+            records=cast(List[DataProviderRecord], lenny_records),
+            total=resp.total,
+            query=resp.query,
+            limit=resp.limit,
+            offset=resp.offset,
+            sort=resp.sort,
+        )
