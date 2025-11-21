@@ -9,10 +9,52 @@ class LennyDataRecord(OpenLibraryDataRecord):
 
     lenny_id: Optional[int] = None
     is_encrypted: bool = False
+    first_publish_year: Optional[int] = None
+    publisher: Optional[list[str]] = None
 
     @property
     def type(self) -> str:
         return "http://schema.org/Book"
+    
+    def metadata(self):
+        """Override to include additional fields like published date."""
+        from datetime import datetime
+        from pyopds2.models import Contributor
+        
+        metadata = super().metadata()
+        
+        if self.first_publish_year:
+            try:
+                metadata.published = datetime(self.first_publish_year, 1, 1)
+            except:
+                pass
+        
+        if self.publisher and len(self.publisher) > 0:
+            metadata.publisher = [
+                Contributor(
+                    name=pub,
+                    identifier=None,
+                    sortAs=None,
+                    role=None,
+                    links=None,
+                )
+                for pub in self.publisher
+            ]
+        
+        if hasattr(self, 'description') and self.description:
+            if isinstance(self.description, dict):
+                metadata.description = self.description.get('value', str(self.description))
+            elif isinstance(self.description, str):
+                metadata.description = self.description
+        
+        return metadata
+    
+    def to_publication(self):
+        """Override to add @context for Readium Web Publication Manifest."""
+        pub = super().to_publication()
+        pub_dict = pub.model_dump()
+        pub_dict["@context"] = "https://readium.org/webpub-manifest/context.jsonld"
+        return type(pub)(**pub_dict)
 
     def links(self) -> List[Link]:
         """Override acquisition links to use Lenny's API endpoints.
@@ -38,35 +80,43 @@ class LennyDataRecord(OpenLibraryDataRecord):
         
         base_uri = f"{LennyDataProvider.BASE_URL}items/{self.lenny_id}"
         if self.is_encrypted:
-            lenny_links += [
+            lenny_links.append(
                 Link(
                     href=f"{base_uri}/borrow",
                     rel="http://opds-spec.org/acquisition/borrow",
-                    type="application/json",
-                    title=None,
+                    type="application/opds-publication+json",
+                    title="Lenny",
                     templated=False,
-                    properties=None,
-                ),
-                Link(
-                    href=f"{base_uri}/return",
-                    rel="http://librarysimplified.org/terms/return",
-                    type="application/json",
-                    title=None,
-                    templated=False,
-                    properties=None,
-                ),
-            ]
+                    properties={
+                        "availability": {
+                            "state": "available"
+                        },
+                        "authenticate": {
+                            "href": f"{LennyDataProvider.BASE_URL}authenticate",
+                            "type": "application/opds-authentication+json"
+                        },
+                        "indirectAcquisition": [
+                            {
+                                "type": "application/vnd.readium.lcp.license.v1.0+json",
+                                "child": [
+                                    {"type": "application/epub+zip"}
+                                ]
+                            }
+                        ]
+                    },
+                )
+            )
         else:
-            lenny_links += [
+            lenny_links.append(
                 Link(
                     href=f"{base_uri}/read",
                     rel="http://opds-spec.org/acquisition/open-access",
-                    type="application/json",
-                    title=None,
+                    type="application/opds-publication+json",
+                    title="Read",
                     templated=False,
                     properties=None,
                 )
-            ]
+            )
         return lenny_links
 
     def images(self) -> Optional[List[Link]]:
@@ -100,8 +150,6 @@ class LennyDataProvider(OpenLibraryDataProvider):
         resp = OpenLibraryDataProvider.search(query=query, limit=limit, offset=offset)
 
         lenny_records: List[LennyDataRecord] = []
-
-        # Convert keys to a predictable list order for mapping
         if isinstance(lenny_ids, Mapping):
             keys = list(lenny_ids.keys())
             values = list(lenny_ids.values())
@@ -132,11 +180,9 @@ class LennyDataProvider(OpenLibraryDataProvider):
         for idx, record in enumerate(resp.records):
             data = record.model_dump()
 
-            # Assign lenny_id properly from mapping keys
             if idx < len(lenny_id_values):
                 data["lenny_id"] = lenny_id_values[idx]
 
-            # Look up encryption status for this specific lenny_id
             lenny_id = data.get("lenny_id")
             if encryption_map and lenny_id is not None:
                 data["is_encrypted"] = encryption_map.get(lenny_id, False)
