@@ -8,6 +8,7 @@ class LennyDataRecord(OpenLibraryDataRecord):
     """Extends OpenLibraryDataRecord with local borrow/return links for Lenny."""
 
     lenny_id: Optional[int] = None
+    is_encrypted: bool = False
 
     @property
     def type(self) -> str:
@@ -21,39 +22,52 @@ class LennyDataRecord(OpenLibraryDataRecord):
         otherwise `/read` for open-access/readable content. When encrypted
         we also include a `return` endpoint.
         """
-        base_links = super().links() or []
         if not self.lenny_id:
-            return base_links
+            return super().links() or []
 
-        base_links.append(Link(
-            rel="self",  
-            href=f"{LennyDataProvider.BASE_URL}/opds/{self.lenny_id}",
-            type="application/opds-publication+json",
-        ))
+        lenny_links = [
+            Link(
+                rel="self",
+                href=f"{LennyDataProvider.BASE_URL}opds/{self.lenny_id}",
+                type="application/opds-publication+json",
+                title=None,
+                templated=False,
+                properties=None,
+            )
+        ]
         
         base_uri = f"{LennyDataProvider.BASE_URL}items/{self.lenny_id}"
-        if getattr(self, "is_encrypted", False):
-            base_links += [
+        if self.is_encrypted:
+            lenny_links += [
                 Link(
                     href=f"{base_uri}/borrow",
                     rel="http://opds-spec.org/acquisition/borrow",
                     type="application/json",
+                    title=None,
+                    templated=False,
+                    properties=None,
                 ),
                 Link(
                     href=f"{base_uri}/return",
                     rel="http://librarysimplified.org/terms/return",
                     type="application/json",
+                    title=None,
+                    templated=False,
+                    properties=None,
                 ),
             ]
         else:
-            base_links += [
+            lenny_links += [
                 Link(
                     href=f"{base_uri}/read",
                     rel="http://opds-spec.org/acquisition/open-access",
                     type="application/json",
+                    title=None,
+                    templated=False,
+                    properties=None,
                 )
             ]
-        return base_links
+        return lenny_links
 
     def images(self) -> Optional[List[Link]]:
         """Provide cover image link based on Open Library cover ID."""
@@ -63,6 +77,9 @@ class LennyDataRecord(OpenLibraryDataRecord):
                     href=f"https://covers.openlibrary.org/b/id/{self.cover_i}-L.jpg",
                     rel="http://opds-spec.org/image",
                     type="image/jpeg",
+                    title=None,
+                    templated=False,
+                    properties=None,
                 )
             ]
         return []
@@ -94,7 +111,7 @@ class LennyDataProvider(OpenLibraryDataProvider):
         limit: int,
         offset: int,
         lenny_ids: Optional[Mapping[int, int]] = None,
-        is_encrypted: Optional[bool] = False,
+        encryption_map: Optional[Mapping[int, bool]] = None,
         base_url: Optional[str] = None,
     ) -> Tuple[List[LennyDataRecord], int]:
         """Perform a metadata search and adapt results into LennyDataRecords."""
@@ -143,7 +160,13 @@ class LennyDataProvider(OpenLibraryDataProvider):
             if idx < len(lenny_id_values):
                 data["lenny_id"] = lenny_id_values[idx]
 
-            data["is_encrypted"] = bool(is_encrypted)
+            # Look up encryption status for this specific lenny_id
+            lenny_id = data.get("lenny_id")
+            if encryption_map and lenny_id is not None:
+                data["is_encrypted"] = encryption_map.get(lenny_id, False)
+            else:
+                data["is_encrypted"] = False
+            print("is_encrypted for record idx", idx, "lenny_id", lenny_id, ":", data["is_encrypted"])
             data["base_url"] = base_url
             lenny_records.append(LennyDataRecord.model_validate(data))
             
