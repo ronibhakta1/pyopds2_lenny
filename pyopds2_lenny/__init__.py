@@ -49,17 +49,13 @@ class LennyDataRecord(OpenLibraryDataRecord):
 
             lenny_links.append(
                 Link(
-                    href=f"{base_uri}/borrow",
+                    href=f"{base_uri}/read?beta=true",
                     rel="http://opds-spec.org/acquisition/borrow",
-                    type="application/opds-publication+json",
+                    type="text/html",
                     title="Lenny",
                     templated=False,
                     properties={
                         "availability": {"state": avail_state},
-                        "authenticate": {
-                            "href": f"{LennyDataProvider.BASE_URL}authenticate",
-                            "type": "application/opds-authentication+json",
-                        },
                         "indirectAcquisition": [
                             {"type": "application/vnd.readium.lcp.license.v1.0+json", "child": [{"type": "application/epub+zip"}]}
                         ],
