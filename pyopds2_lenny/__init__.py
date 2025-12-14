@@ -49,15 +49,26 @@ class LennyDataRecord(OpenLibraryDataRecord):
 
             lenny_links.append(
                 Link(
-                    href=f"{base_uri}/read?beta=true",
+                    href=f"{base_uri}/read",
                     rel="http://opds-spec.org/acquisition/borrow",
-                    type="text/html",
+                    type="application/opds-publication+json",
                     title="Lenny",
                     templated=False,
                     properties={
+                        "authenticate": {
+                            "type": "application/opds-authentication+json",
+                            "href": f"{LennyDataProvider.BASE_URL}oauth/implicit"
+                        },
                         "availability": {"state": avail_state},
                         "indirectAcquisition": [
-                            {"type": "application/vnd.readium.lcp.license.v1.0+json", "child": [{"type": "application/epub+zip"}]}
+                            {
+                                "type": "application/vnd.readium.lcp.license.v1.0+json",
+                                "child": [
+                                    {
+                                        "type": "application/epub+zip"
+                                    }
+                                ]
+                            }
                         ],
                     },
                 )
@@ -144,3 +155,53 @@ class LennyDataProvider(OpenLibraryDataProvider):
             offset=resp.offset,
             sort=resp.sort,
         )
+
+    @classmethod
+    def get_authentication_document(cls) -> dict:
+        """
+        Returns the OPDS Authentication Document (JSON).
+        Uses cls.BASE_URL which should be set by the application.
+        """
+        # Ensure BASE_URL ends with slash or handle it.
+        # Based on usage in properties/links, it seems to end with slash.
+        base = cls.BASE_URL
+        
+        return {
+            "id": f"{base}oauth/implicit",
+            "title": "Lenny Authentication",
+            "description": "Sign in to Lenny",
+            "authentication": [
+                {
+                    "type": "http://opds-spec.org/auth/oauth/implicit",
+                    "links": [
+                        {
+                            "rel": "authenticate",
+                            "href": f"{base}oauth/authorize",
+                            "type": "text/html"
+                        },
+                        {
+                            "rel": "refresh",
+                            "href": f"{base}oauth/authorize",
+                            "type": "text/html"
+                        }
+                    ]
+                }
+            ],
+            "links": [
+                 {
+                    "rel": "profile",
+                    "href": f"{base}profile",
+                    "type": "application/opds-profile+json"
+                 },
+                 {
+                    "rel": "http://opds-spec.org/shelf",
+                    "href": f"{base}profile",
+                    "type": "application/opds+json"
+                 },
+                 {
+                    "rel": "start",
+                    "href": f"{base}opds",
+                    "type": "application/opds+json"
+                 }
+            ]
+        }
