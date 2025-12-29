@@ -2,34 +2,71 @@ from typing import List, Tuple, Optional, cast
 from collections.abc import Mapping, Iterable
 from pyopds2_openlibrary import OpenLibraryDataProvider, OpenLibraryDataRecord, Link
 from pyopds2.provider import DataProvider, DataProviderRecord
+from urllib.parse import quote
 
+def build_post_borrow_publication(book_id: int) -> dict:
+    """
+    Build OPDS publication response after successful borrow.
+    
+    Returns publication metadata with direct acquisition links:
+    - self: points to /opds/{id}
+    - acquisition: points to reader with manifest (for reading in browser)
+    - return: points to /items/{id}/return
+    """
+    resp = LennyDataProvider.search(query=f"edition_key:OL{book_id}M", limit=1, lenny_ids=[book_id])
+    
+    if resp.records and isinstance(resp.records[0], LennyDataRecord):
+        record = resp.records[0]
+        publication = record.to_publication().model_dump()
+        publication["links"] = [
+            link.model_dump(exclude_none=True) 
+            for link in record.post_borrow_links()
+        ]
+        return publication
+
+    return {
+        "metadata": {
+            "title": "Unknown Title"
+        },
+        "links": []
+    }
 
 class LennyDataRecord(OpenLibraryDataRecord):
-    """Extends OpenLibraryDataRecord with local borrow/return links for Lenny."""
+    """
+    Extends OpenLibraryDataRecord with Lenny-specific acquisition links.
+    
+    Generates OPDS links for:
+    - Encrypted items: self + borrow (with auth properties)
+    - Open-access items: self + read
+    """
 
     lenny_id: Optional[int] = None
     is_encrypted: bool = False
+    is_borrowable: Optional[bool] = None
 
     @property
     def type(self) -> str:
         return "http://schema.org/Book"
 
     def links(self) -> List[Link]:
-        """Override acquisition links to use Lenny's API endpoints.
-
-        If the record was created with an `is_encrypted` flag the primary
-        acquisition link will be `/borrow` (for encrypted/loaned content),
-        otherwise `/read` for open-access/readable content. When encrypted
-        we also include a `return` endpoint.
+        """
+        Generate OPDS acquisition links for this publication.
+        
+        Returns list of Link objects:
+        - self: publication info at /opds/{id}
+        - borrow: (encrypted) auth-required acquisition at /items/{id}/borrow
+        - read: (open-access) direct read at /items/{id}/read
         """
         if not self.lenny_id:
             return super().links() or []
 
-        # Minimal, predictable acquisition links: always use Lenny/Read titles
+        base_url = LennyDataProvider.BASE_URL
+        item_url = f"{base_url}items/{self.lenny_id}"
+        
         lenny_links = [
             Link(
                 rel="self",
-                href=f"{LennyDataProvider.BASE_URL}opds/{self.lenny_id}",
+                href=f"{base_url}opds/{self.lenny_id}",
                 type="application/opds-publication+json",
                 title=None,
                 templated=False,
@@ -37,43 +74,83 @@ class LennyDataRecord(OpenLibraryDataRecord):
             )
         ]
 
-        base_uri = f"{LennyDataProvider.BASE_URL}items/{self.lenny_id}"
-
         if self.is_encrypted:
-            borrowable = getattr(self, "is_borrowable", None)
-            if borrowable is None:
-                # If provider didn't supply, default to available for permissive behavior
-                avail_state = "available"
-            else:
-                avail_state = "available" if bool(borrowable) else "unavailable"
+            avail_state = "available" if self.is_borrowable is not False else "unavailable"
 
             lenny_links.append(
                 Link(
-                    href=f"{base_uri}/read?beta=true",
+                    href=f"{item_url}/borrow",
                     rel="http://opds-spec.org/acquisition/borrow",
-                    type="text/html",
-                    title="Lenny",
+                    type="application/opds-publication+json",
+                    title="Borrow",
                     templated=False,
                     properties={
+                        "authenticate": {
+                            "type": "application/opds-authentication+json",
+                            "href": f"{base_url}oauth/implicit"
+                        },
                         "availability": {"state": avail_state},
-                        "indirectAcquisition": [
-                            {"type": "application/vnd.readium.lcp.license.v1.0+json", "child": [{"type": "application/epub+zip"}]}
-                        ],
+                        "indirectAcquisition": [{
+                            "type": "application/vnd.readium.lcp.license.v1.0+json",
+                            "child": [{"type": "application/epub+zip"}]
+                        }],
                     },
                 )
             )
         else:
             lenny_links.append(
                 Link(
-                    href=f"{base_uri}/read",
+                    href=f"{item_url}/read",
                     rel="http://opds-spec.org/acquisition/open-access",
                     type="application/opds-publication+json",
                     title="Read",
                     templated=False,
-                    properties=None,
                 )
             )
         return lenny_links
+
+    def post_borrow_links(self) -> List[Link]:
+        """
+        Generate OPDS links after a successful borrow.
+        Returns: self, read (acquisition), return.
+        """
+        if not self.lenny_id:
+            return []
+
+        base_url = LennyDataProvider.BASE_URL
+        # BASE_URL includes /v1/api/, so we construct root_url for reader which is typically at /
+        root_url = base_url.replace("/v1/api/", "/")
+        
+        manifest_url = f"{base_url}items/{self.lenny_id}/readium/manifest.json"
+        encoded_manifest = quote(manifest_url, safe='')
+        reader_url = f"{root_url}read/manifest/{encoded_manifest}"
+
+        return [
+             Link(
+                rel="self",
+                href=f"{base_url}opds/{self.lenny_id}",
+                type="application/opds-publication+json",
+                title=None,
+                templated=False,
+                properties=None
+            ),
+            Link(
+                rel="http://opds-spec.org/acquisition",
+                href=reader_url,
+                type="text/html",
+                title="Read",
+                templated=False,
+                properties=None
+            ),
+            Link(
+                rel="http://opds-spec.org/acquisition/return",
+                href=f"{base_url}items/{self.lenny_id}/return",
+                type="application/opds-publication+json",
+                title="Return",
+                templated=False,
+                properties=None
+            )
+        ]
 
 
 
@@ -144,3 +221,53 @@ class LennyDataProvider(OpenLibraryDataProvider):
             offset=resp.offset,
             sort=resp.sort,
         )
+
+    @classmethod
+    def get_authentication_document(cls) -> dict:
+        """
+        Returns the OPDS Authentication Document (JSON).
+        Uses cls.BASE_URL which should be set by the application.
+        """
+        # Ensure BASE_URL ends with slash or handle it.
+        # Based on usage in properties/links, it seems to end with slash.
+        base = cls.BASE_URL
+        
+        return {
+            "id": f"{base}oauth/implicit",
+            "title": "Lenny Authentication",
+            "description": "Sign in to Lenny",
+            "authentication": [
+                {
+                    "type": "http://opds-spec.org/auth/oauth/implicit",
+                    "links": [
+                        {
+                            "rel": "authenticate",
+                            "href": f"{base}oauth/authorize",
+                            "type": "text/html"
+                        },
+                        {
+                            "rel": "refresh",
+                            "href": f"{base}oauth/authorize",
+                            "type": "text/html"
+                        }
+                    ]
+                }
+            ],
+            "links": [
+                 {
+                    "rel": "profile",
+                    "href": f"{base}profile",
+                    "type": "application/opds-profile+json"
+                 },
+                 {
+                    "rel": "http://opds-spec.org/shelf",
+                    "href": f"{base}profile",
+                    "type": "application/opds+json"
+                 },
+                 {
+                    "rel": "start",
+                    "href": f"{base}opds",
+                    "type": "application/opds+json"
+                 }
+            ]
+        }
