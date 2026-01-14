@@ -4,7 +4,7 @@ from pyopds2_openlibrary import OpenLibraryDataProvider, OpenLibraryDataRecord, 
 from pyopds2.provider import DataProvider, DataProviderRecord
 from urllib.parse import quote
 
-def build_post_borrow_publication(book_id: int) -> dict:
+def build_post_borrow_publication(book_id: int, auth_mode_direct: bool = False) -> dict:
     """
     Build OPDS publication response after successful borrow.
     
@@ -17,6 +17,8 @@ def build_post_borrow_publication(book_id: int) -> dict:
     
     if resp.records and isinstance(resp.records[0], LennyDataRecord):
         record = resp.records[0]
+        record.auth_mode_direct = auth_mode_direct
+        
         publication = record.to_publication().model_dump()
         publication["links"] = [
             link.model_dump(exclude_none=True) 
@@ -50,6 +52,7 @@ class LennyDataRecord(OpenLibraryDataRecord):
     lenny_id: Optional[int] = None
     is_encrypted: bool = False
     is_borrowable: Optional[bool] = None
+    auth_mode_direct: bool = False
 
     @property
     def type(self) -> str:
@@ -84,26 +87,46 @@ class LennyDataRecord(OpenLibraryDataRecord):
         if self.is_encrypted:
             avail_state = "available" if self.is_borrowable is not False else "unavailable"
 
-            lenny_links.append(
-                Link(
-                    href=f"{item_url}/borrow",
-                    rel="http://opds-spec.org/acquisition/borrow",
-                    type="application/opds-publication+json",
-                    title="Borrow",
-                    templated=False,
-                    properties={
-                        "authenticate": {
-                            "type": "application/opds-authentication+json",
-                            "href": f"{base_url}oauth/implicit"
+            if self.auth_mode_direct:
+                 # Direct Auth Mode: Simple link to our borrow page which handles OTP
+                 lenny_links.append(
+                    Link(
+                        href=f"{item_url}/borrow?beta=true",
+                        rel="http://opds-spec.org/acquisition/borrow",
+                        type="text/html",
+                        title="Lenny",
+                        templated=False,
+                        properties={
+                            "availability": {"state": avail_state},
+                            "indirectAcquisition": [{
+                                "type": "application/vnd.readium.lcp.license.v1.0+json",
+                                "child": [{"type": "application/epub+zip"}]
+                            }],
                         },
-                        "availability": {"state": avail_state},
-                        "indirectAcquisition": [{
-                            "type": "application/vnd.readium.lcp.license.v1.0+json",
-                            "child": [{"type": "application/epub+zip"}]
-                        }],
-                    },
+                    )
                 )
-            )
+            else:
+                # OAuth Implicit Mode (Default)
+                lenny_links.append(
+                    Link(
+                        href=f"{item_url}/borrow",
+                        rel="http://opds-spec.org/acquisition/borrow",
+                        type="application/opds-publication+json",
+                        title="Lenny",
+                        templated=False,
+                        properties={
+                            "authenticate": {
+                                "type": "application/opds-authentication+json",
+                                "href": f"{base_url}oauth/implicit"
+                            },
+                            "availability": {"state": avail_state},
+                            "indirectAcquisition": [{
+                                "type": "application/vnd.readium.lcp.license.v1.0+json",
+                                "child": [{"type": "application/epub+zip"}]
+                            }],
+                        },
+                    )
+                )
         else:
             lenny_links.append(
                 Link(
@@ -125,12 +148,18 @@ class LennyDataRecord(OpenLibraryDataRecord):
             return []
 
         base_url = LennyDataProvider.BASE_URL
-        # BASE_URL includes /v1/api/, so we construct root_url for reader which is typically at /
         root_url = base_url.replace("/v1/api/", "/")
         
         manifest_url = f"{base_url}items/{self.lenny_id}/readium/manifest.json"
         encoded_manifest = quote(manifest_url, safe='')
         reader_url = f"{root_url}read/manifest/{encoded_manifest}"
+
+        return_link_href = f"{base_url}items/{self.lenny_id}/return"
+        return_link_type = "application/opds-publication+json"
+        
+        if getattr(self, "auth_mode_direct", False):
+             return_link_type = "text/html"
+             return_link_href += "?beta=true"
 
         return [
              Link(
@@ -151,8 +180,8 @@ class LennyDataRecord(OpenLibraryDataRecord):
             ),
             Link(
                 rel="http://opds-spec.org/acquisition/return",
-                href=f"{base_url}items/{self.lenny_id}/return",
-                type="application/opds-publication+json",
+                href=return_link_href,
+                type=return_link_type,
                 title="Return",
                 templated=False,
                 properties=None
@@ -235,8 +264,6 @@ class LennyDataProvider(OpenLibraryDataProvider):
         Returns the OPDS Authentication Document (JSON).
         Uses cls.BASE_URL which should be set by the application.
         """
-        # Ensure BASE_URL ends with slash or handle it.
-        # Based on usage in properties/links, it seems to end with slash.
         base = cls.BASE_URL
         
         return {
