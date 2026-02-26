@@ -138,8 +138,8 @@ class LennyDataRecord(OpenLibraryDataRecord):
                 Link(
                     href=f"{item_url}/read",
                     rel="http://opds-spec.org/acquisition/open-access",
-                    type="application/opds-publication+json",
-                    title="Read",
+                    type="text/html",
+                    title="Lenny",
                     templated=False,
                 )
             )
