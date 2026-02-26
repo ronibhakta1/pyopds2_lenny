@@ -408,17 +408,36 @@ class LennyDataProvider(OpenLibraryDataProvider):
                 "rel": "http://opds-spec.org/auth/oauth/implicit"
             },
         ]
+        
+    @classmethod
+    def _catalog_links(cls, auth_mode_direct: bool = False) -> list:
+        """Shared shelf + profile links for catalog responses."""
+        base = cls.BASE_URL
+        suffix = "?auth_mode=direct" if auth_mode_direct else ""
+        return [
+            OPDSLink(rel="http://opds-spec.org/shelf",
+                     href=f"{base}shelf{suffix}",
+                     type="application/opds+json",
+                     title="Bookshelf"),
+            OPDSLink(rel="profile",
+                     href=f"{base}profile{suffix}",
+                     type="application/opds-profile+json",
+                     title="User Profile"),
+        ]
 
     @classmethod
     def build_catalog(
         cls,
         search_response: "DataProvider.SearchResponse",
         title: str = "Lenny Catalog",
-        limit: int = 50,
         auth_mode_direct: bool = False
     ) -> dict:
-        """
-        Build complete OPDS 2.0 catalog from search response.
+        """Build complete OPDS 2.0 catalog from search response.
+
+        Delegates to upstream ``Catalog.create()`` (which calls
+        ``add_pagination()`` for paging) and layers on Lenny-specific
+        navigation and links.
+
         Returns dict ready for JSON serialization.
         """
         base = cls.BASE_URL
@@ -427,33 +446,24 @@ class LennyDataProvider(OpenLibraryDataProvider):
         catalog = Catalog.create(
             search_response,
             metadata=Metadata(title=title),
-            navigation=[OPDSNavigation(**n) for n in cls.navigation(limit, auth_mode_direct)],
-            links=[
-                OPDSLink(rel="http://opds-spec.org/shelf",
-                href=f"{base}shelf{suffix}",
-                type="application/opds+json",
-                title="Bookshelf"),
-                OPDSLink(rel="profile",
-                href=f"{base}profile{suffix}",
-                type="application/opds-profile+json",
-                title="User Profile")
-            ]
+            navigation=[OPDSNavigation(**n) for n in cls.navigation(search_response.limit, auth_mode_direct)],
+            links=cls._catalog_links(auth_mode_direct),
         )
         return catalog.model_dump()
 
     @classmethod
     def empty_catalog(cls, offset: int = 0, limit: int = 50, title: str = "Lenny Catalog", auth_mode_direct: bool = False) -> dict:
-        """Build empty OPDS catalog when no items exist."""
-        empty_response = DataProvider.SearchResponse(
-            provider=cls,
-            records=[],
-            total=0,
-            query="",
-            limit=limit,
-            offset=offset,
-            sort=None,
+        """Build empty OPDS catalog when no items exist.
+
+        Calls ``Catalog.create()`` with no ``response`` (defaults to
+        ``None``), so no publications or pagination are added.
+        """
+        catalog = Catalog.create(
+            metadata=Metadata(title=title),
+            navigation=[OPDSNavigation(**n) for n in cls.navigation(limit, auth_mode_direct)],
+            links=cls._catalog_links(auth_mode_direct),
         )
-        return cls.build_catalog(empty_response, title=title, limit=limit, auth_mode_direct=auth_mode_direct)
+        return catalog.model_dump()
 
     @classmethod
     def build_publication(
