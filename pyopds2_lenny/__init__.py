@@ -333,6 +333,12 @@ class LennyDataProvider(OpenLibraryDataProvider):
                     "type": "application/opds-profile+json"
                 },
                 {
+                    "rel": "start",
+                    "href": f"{base}opds",
+                    "type": "application/opds+json",
+                    "title": "Home"
+                },
+                {
                     "rel": "http://opds-spec.org/shelf",
                     "href": f"{base}shelf",
                     "type": "application/opds+json",
@@ -365,6 +371,12 @@ class LennyDataProvider(OpenLibraryDataProvider):
                     "rel": "self",
                     "href": f"{base}shelf", 
                     "type": "application/opds+json"
+                },
+                {
+                    "rel": "start",
+                    "href": f"{base}opds",
+                    "type": "application/opds+json",
+                    "title": "Home"
                 },
                 {
                     "rel": "profile",
