@@ -423,7 +423,7 @@ class LennyDataProvider(OpenLibraryDataProvider):
                 "rel": "collection"
             },
             {
-                "href": (cls.OAUTH_URL or base) + "implicit",
+                "href": f"{cls.OAUTH_URL or base}implicit",
                 "title": "Authentication",
                 "type": "application/opds-authentication+json",
                 "rel": "http://opds-spec.org/auth/oauth/implicit+pkce"
